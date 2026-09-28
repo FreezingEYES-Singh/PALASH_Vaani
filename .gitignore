@@ -1,0 +1,67 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Visual Studio Code related
+.vscode/
+
+# Flutter / Dart / Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Keystores & sensitive credentials
+*.jks
+*.keystore
+**/android/key.properties
+**/android/local.properties
+
+# Android build artifacts
+/android/app/debug
+/android/app/profile
+/android/app/release
+.gradle/
+**/android/captures/
+
+# iOS / macOS build artifacts & ephemeral files
+**/ios/Flutter/ephemeral
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/flutter_assets/
+**/ios/DerivedData/
+**/ios/Pods/
+**/macos/Flutter/ephemeral
+
+# Desktop ephemeral files
+**/windows/flutter/ephemeral
+**/linux/flutter/ephemeral
+
+# Symbolication & Obfuscation
+app.*.symbols
+app.*.map.json
+
+# Widget Preview
+.widget_preview/
