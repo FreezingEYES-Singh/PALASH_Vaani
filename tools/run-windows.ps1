@@ -6,7 +6,8 @@
     Start it by double-clicking run-windows.bat in the project folder.
 
     1. Checks that Git and Flutter are installed. If Flutter is missing, it
-       offers to download it into C:\src\flutter and add it to your PATH.
+       offers to download it into C:\src\flutter (or <drive>\src\flutter on
+       the drive with the most free space, if C: is low) and add it to PATH.
     2. Downloads the latest changes from GitHub and starts the app in your
        browser (Microsoft Edge by default).
     3. Checks GitHub for new changes every 30 seconds. When it finds some, it
@@ -24,11 +25,18 @@
 .PARAMETER IntervalSeconds
     How often to check GitHub for new changes, in seconds. Default: 30.
 
+.PARAMETER FlutterDir
+    Where to install Flutter if it is missing, for example D:\src\flutter.
+    The path must not contain spaces.
+
 .PARAMETER FlutterArgs
     Extra arguments for "flutter run", for example "--web-port 8080".
 
 .EXAMPLE
     run-windows.bat -Browser chrome
+
+.EXAMPLE
+    run-windows.bat -FlutterDir D:\src\flutter
 #>
 param(
     [ValidateSet('edge', 'chrome', 'brave')]
@@ -36,6 +44,8 @@ param(
 
     [ValidateRange(10, 3600)]
     [int]$IntervalSeconds = 30,
+
+    [string]$FlutterDir = '',
 
     [string]$FlutterArgs = ''
 )
@@ -45,6 +55,10 @@ $ErrorActionPreference = 'Stop'
 $FlutterVersion = '3.47.2'
 $FlutterZipSha256 = '37934f2128a55d77a38baba12fd611157ed23a47bf7d2b7d17e9e84da118409d'
 $MinFlutterVersion = [version]'3.47.0'
+# Installing needs room for the 1.9 GB download plus the unpacked SDK and packages.
+$InstallNeedsGB = 6
+# Below this much free space, prefer another drive for Flutter.
+$SystemDriveComfortGB = 10
 # "flutter run" must finish compiling and connect to the browser before it can
 # restart the app, so updates wait until the app has been up this long.
 $StartupGraceSeconds = 120
@@ -94,18 +108,45 @@ function Add-UserPath([string]$Dir) {
     if (($env:Path -split ';') -notcontains $Dir) { $env:Path = "$Dir;$env:Path" }
 }
 
-function Install-Flutter {
-    # Flutter breaks when its folder path has spaces, which user folders often
-    # do, so it goes in C:\src\flutter as the Flutter docs suggest.
-    $parent = Join-Path $env:SystemDrive 'src'
-    $root = Join-Path $parent 'flutter'
-    $bin = Join-Path $root 'bin'
+# Suggests where to install Flutter: an existing <drive>\src\flutter if there
+# is one, else C:\src\flutter, or the drive with the most free space when C:
+# is low. (Flutter breaks when its path has spaces, which user folders often
+# have, so it never goes under the user folder.)
+function Get-DefaultFlutterDir {
+    param($Drives = @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady }))
+    foreach ($drive in $Drives) {
+        $dir = $drive.Name.TrimEnd('\') + '\src\flutter'
+        if (Test-Path "$dir\bin\flutter.bat") { return $dir }
+    }
+    $system = $Drives | Where-Object { $_.Name.TrimEnd('\') -eq $env:SystemDrive } | Select-Object -First 1
+    if ($system -and $system.AvailableFreeSpace -ge $SystemDriveComfortGB * 1GB) {
+        return "$env:SystemDrive\src\flutter"
+    }
+    $roomiest = $Drives | Sort-Object AvailableFreeSpace -Descending | Select-Object -First 1
+    if ($roomiest) { return $roomiest.Name.TrimEnd('\') + '\src\flutter' }
+    return "$env:SystemDrive\src\flutter"
+}
+
+function Install-Flutter([string]$Root) {
+    # The download unpacks into a folder named "flutter", and Flutter's own .bat
+    # scripts break on paths with spaces or "!".
+    if ($Root -match '[\s!]' -or (Split-Path -Leaf $Root) -ne 'flutter') {
+        throw "Flutter can't be installed in '$Root'. Use a folder named flutter with no spaces or ! in its path, for example D:\src\flutter."
+    }
+    $parent = Split-Path -Parent $Root
+    $bin = Join-Path $Root 'bin'
     if (-not (Test-Path (Join-Path $bin 'flutter.bat'))) {
-        if (Test-Path $root) {
-            throw "The folder $root already exists but has no Flutter in it. Rename or delete it, then run this again."
+        if (Test-Path $Root) {
+            throw "The folder $Root already exists but has no Flutter in it. Rename or delete it, then run this again."
         }
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
-        $zip = Join-Path $env:TEMP "flutter_windows_$FlutterVersion-stable.zip"
+        $drive = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot((Resolve-Path $parent).Path))
+        $freeGB = [math]::Round($drive.AvailableFreeSpace / 1GB, 1)
+        if ($freeGB -lt $InstallNeedsGB) {
+            throw "Installing Flutter needs about $InstallNeedsGB GB of free space, but $($drive.Name) has $freeGB GB. Free up space or choose another drive, for example: run-windows.bat -FlutterDir D:\src\flutter"
+        }
+        # Download next to the install rather than to the (often fuller) system drive.
+        $zip = Join-Path $parent "flutter_windows_$FlutterVersion-stable.zip"
         $url = "https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_$FlutterVersion-stable.zip"
         if (Test-Path $zip) { Remove-Item $zip -Force }
 
@@ -124,19 +165,27 @@ function Install-Flutter {
             throw 'The Flutter download is damaged. Run this again to download it again.'
         }
 
-        Write-Status "Unpacking Flutter into $root (this takes a few minutes)..."
+        Write-Status "Unpacking Flutter into $Root (this takes a few minutes)..."
         if (Get-Command tar.exe -ErrorAction SilentlyContinue) {
             & tar.exe -xf $zip -C $parent
         } else {
             Expand-Archive -Path $zip -DestinationPath $parent
         }
         if (-not (Test-Path (Join-Path $bin 'flutter.bat'))) {
-            throw "Unpacking Flutter failed. Delete the folder $root if it exists, then run this again."
+            throw "Unpacking Flutter failed. Delete the folder $Root if it exists, then run this again."
         }
         Remove-Item $zip -Force
     }
     Add-UserPath $bin
-    Write-Status "Flutter is installed in $root and added to your PATH." 'Green'
+    # When Flutter is not on the system drive, keep downloaded packages next to it too.
+    $onSystemDrive = [System.IO.Path]::GetPathRoot($Root) -eq [System.IO.Path]::GetPathRoot("$env:SystemDrive\")
+    if (-not $onSystemDrive -and -not $env:PUB_CACHE) {
+        $pubCache = Join-Path $parent 'pub-cache'
+        [Environment]::SetEnvironmentVariable('PUB_CACHE', $pubCache, 'User')
+        $env:PUB_CACHE = $pubCache
+        Write-Status "Packages will be stored in $pubCache."
+    }
+    Write-Status "Flutter is installed in $Root and added to your PATH." 'Green'
 }
 
 function Get-FlutterVersion {
@@ -244,6 +293,9 @@ function Sync-FromGitHub {
 
     Write-Status 'Downloaded an update from GitHub:' 'Green'
     foreach ($line in ($commits -split "`n")) { Write-Host "           $line" -ForegroundColor Green }
+    if (@($files -match '^(run-windows\.bat|tools/run-windows\.ps1)$').Count -gt 0) {
+        Write-Status 'This update also changes this launcher. To use the new version, press q and start run-windows.bat again.' 'Yellow'
+    }
 
     if (@($files -match '^(pubspec\.(yaml|lock)$|web/)').Count -gt 0) { return 'full' }
     if (@($files -match '^(lib|assets)/').Count -gt 0) { return 'hot' }
@@ -271,11 +323,14 @@ try {
 
     if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
         if (-not $OnWindows) { throw 'Flutter is not installed.' }
-        $answer = Read-Host "Flutter is not installed. Download and install Flutter $FlutterVersion now? (Y/n)"
-        if ($answer -and $answer -notmatch '^[Yy]') {
-            throw 'Flutter is needed to run the app. See https://docs.flutter.dev/get-started/install'
+        if (-not $FlutterDir) { $FlutterDir = Get-DefaultFlutterDir }
+        if (-not (Test-Path "$FlutterDir\bin\flutter.bat")) {
+            $answer = Read-Host "Flutter is not installed. Download Flutter $FlutterVersion (1.9 GB) and install it in $FlutterDir? (Y/n)"
+            if ($answer -and $answer -notmatch '^[Yy]') {
+                throw 'Flutter is needed to run the app. To install it somewhere else, run: run-windows.bat -FlutterDir D:\src\flutter'
+            }
         }
-        Install-Flutter
+        Install-Flutter $FlutterDir
     }
     # Shows the version. On first use, Flutter also finishes setting itself up here.
     & flutter --version
