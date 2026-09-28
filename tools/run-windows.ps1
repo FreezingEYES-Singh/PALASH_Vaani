@@ -325,7 +325,7 @@ try {
         if (-not $OnWindows) { throw 'Flutter is not installed.' }
         if (-not $FlutterDir) { $FlutterDir = Get-DefaultFlutterDir }
         if (-not (Test-Path "$FlutterDir\bin\flutter.bat")) {
-            $answer = Read-Host "Flutter is not installed. Download Flutter $FlutterVersion (1.9 GB) and install it in $FlutterDir? (Y/n)"
+            $answer = Read-Host "Flutter is not installed. Download Flutter $FlutterVersion (1.9 GB) and install it in ${FlutterDir}? (Y/n)"
             if ($answer -and $answer -notmatch '^[Yy]') {
                 throw 'Flutter is needed to run the app. To install it somewhere else, run: run-windows.bat -FlutterDir D:\src\flutter'
             }

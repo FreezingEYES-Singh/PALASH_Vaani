@@ -74,8 +74,10 @@ instead of %TEMP%, PUB_CACHE) have not been run with the real download.
    launcher itself changed.
 5. **Update with app changes.** Message the cloud session "ready for update
    test". It will push a one-line visible change to `lib/` (the dashboard
-   heading gains " - auto-update test") and revert it after you confirm. The
-   app should show each change within about 30 s with no input from you.
+   heading gains " - auto-update test") and revert it after you confirm. Both
+   commits carry `[skip ci]`, so the public GitHub Pages site isn't
+   redeployed. The app should show each change within about 30 s with no
+   input from you.
 6. **Keys.** `R` restarts the app; `q` quits and closes the browser. Closing
    the browser window instead should end the launcher with "The app was
    closed."
